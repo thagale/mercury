@@ -516,6 +516,64 @@ void test_timeout_ms_idle(void)
     TEST_ASSERT_GREATER_THAN(60000, ms);
 }
 
+/* ---- Keepalive channel-guard regression tests ---- */
+
+/* Advance the session past the post-ACCEPT connect confirmation so it
+ * lands in IDLE_ISS.  goto_connected() leaves ACK_TX pending (the caller
+ * must send a connect-confirm ACK before the peer drops from ACCEPTING). */
+static void goto_idle_iss(void)
+{
+    goto_connected();
+    arq_event_t ev = make_event(ARQ_EV_TIMER_ACK);  /* fires confirm ACK */
+    arq_fsm_dispatch(&sess, &ev);
+    ev = make_event(ARQ_EV_TX_COMPLETE);             /* ACK_TX -> IDLE_ISS */
+    arq_fsm_dispatch(&sess, &ev);
+    TEST_ASSERT_EQUAL_INT(ARQ_DFLOW_IDLE_ISS, sess.dflow_state);
+    RESET_FAKE(fake_send_tx_frame);
+}
+
+/* RX_KEEPALIVE while IDLE_ISS must NOT immediately send KEEPALIVE_ACK;
+ * instead the FSM enters KEEPALIVE_ACK_TX to wait out ARQ_CHANNEL_GUARD_MS
+ * so the IRS radio has time to switch from TX back to RX before our
+ * response hits the air.  This prevents the "ISS responds too quickly"
+ * race seen in field logs (ISS PTT-ON before IRS PTT-OFF). */
+void test_rx_keepalive_idle_iss_enters_guarded_state(void)
+{
+    goto_idle_iss();
+
+    arq_event_t ev = make_event(ARQ_EV_RX_KEEPALIVE);
+    arq_fsm_dispatch(&sess, &ev);
+
+    /* Must enter the guard state — no frame sent yet. */
+    TEST_ASSERT_EQUAL_INT(ARQ_DFLOW_KEEPALIVE_ACK_TX, sess.dflow_state);
+    TEST_ASSERT_EQUAL_INT(0, fake_send_tx_frame_fake.call_count);
+    TEST_ASSERT_FALSE(sess.keepalive_ack_enter_irs);
+}
+
+/* After the channel guard elapses (TIMER_ACK), the KEEPALIVE_ACK is sent.
+ * After TX_COMPLETE the ISS returns to IDLE_ISS (not IRS). */
+void test_rx_keepalive_ack_sent_after_guard_returns_idle_iss(void)
+{
+    goto_idle_iss();
+
+    /* Peer sends KEEPALIVE — we must guard before responding. */
+    arq_event_t ev = make_event(ARQ_EV_RX_KEEPALIVE);
+    arq_fsm_dispatch(&sess, &ev);
+    TEST_ASSERT_EQUAL_INT(ARQ_DFLOW_KEEPALIVE_ACK_TX, sess.dflow_state);
+    TEST_ASSERT_EQUAL_INT(0, fake_send_tx_frame_fake.call_count);
+
+    /* Guard elapses: KEEPALIVE_ACK frame should now be queued for TX. */
+    ev = make_event(ARQ_EV_TIMER_ACK);
+    arq_fsm_dispatch(&sess, &ev);
+    TEST_ASSERT_EQUAL_INT(1, fake_send_tx_frame_fake.call_count);
+
+    /* TX completes: must return to IDLE_ISS (not IRS). */
+    ev = make_event(ARQ_EV_TX_COMPLETE);
+    arq_fsm_dispatch(&sess, &ev);
+    TEST_ASSERT_EQUAL_INT(ARQ_DFLOW_IDLE_ISS, sess.dflow_state);
+    TEST_ASSERT_EQUAL_INT(ARQ_CONN_CONNECTED, sess.conn_state);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -541,5 +599,8 @@ int main(void)
     RUN_TEST(test_call_timeout);
     RUN_TEST(test_stop_listen);
     RUN_TEST(test_timeout_ms_idle);
+    /* Keepalive channel-guard regression */
+    RUN_TEST(test_rx_keepalive_idle_iss_enters_guarded_state);
+    RUN_TEST(test_rx_keepalive_ack_sent_after_guard_returns_idle_iss);
     return UNITY_END();
 }

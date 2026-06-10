@@ -56,8 +56,9 @@ const char *arq_dflow_state_name(arq_dflow_state_t s)
         [ARQ_DFLOW_MODE_REQ_TX]    = "MODE_REQ_TX",
         [ARQ_DFLOW_MODE_REQ_WAIT]  = "MODE_REQ_WAIT",
         [ARQ_DFLOW_MODE_ACK_TX]    = "MODE_ACK_TX",
-        [ARQ_DFLOW_KEEPALIVE_TX]   = "KEEPALIVE_TX",
-        [ARQ_DFLOW_KEEPALIVE_WAIT] = "KEEPALIVE_WAIT",
+        [ARQ_DFLOW_KEEPALIVE_TX]    = "KEEPALIVE_TX",
+        [ARQ_DFLOW_KEEPALIVE_WAIT]   = "KEEPALIVE_WAIT",
+        [ARQ_DFLOW_KEEPALIVE_ACK_TX] = "KEEPALIVE_ACK_TX",
     };
     if ((unsigned)s < ARQ_DFLOW__COUNT) return names[s];
     return "UNKNOWN";
@@ -1188,19 +1189,22 @@ static void fsm_connected(arq_session_t *sess, const arq_event_t *ev)
     case ARQ_EV_RX_KEEPALIVE:
         /* Handle keepalive probe from ANY data-flow state so the peer
          * never sees a timeout just because we are busy (e.g. WAIT_ACK
-         * retrying a data frame whose ACK is lost).  KEEPALIVE_TX and
-         * KEEPALIVE_WAIT manage their own RX_KEEPALIVE paths in fsm_dflow. */
+         * retrying a data frame whose ACK is lost).  KEEPALIVE_TX,
+         * KEEPALIVE_WAIT, and KEEPALIVE_ACK_TX manage their own paths. */
         if (sess->dflow_state != ARQ_DFLOW_KEEPALIVE_TX &&
-            sess->dflow_state != ARQ_DFLOW_KEEPALIVE_WAIT)
+            sess->dflow_state != ARQ_DFLOW_KEEPALIVE_WAIT &&
+            sess->dflow_state != ARQ_DFLOW_KEEPALIVE_ACK_TX)
         {
-            HLOGI(LOG_COMP, "RX_KEEPALIVE in dflow=%s — sending KEEPALIVE_ACK",
+            HLOGI(LOG_COMP, "RX_KEEPALIVE in dflow=%s — queueing KEEPALIVE_ACK (channel guard)",
                   arq_dflow_state_name(sess->dflow_state));
-            send_ctrl_frame(sess, ARQ_SUBTYPE_KEEPALIVE_ACK);
-            sess->keepalive_miss_count = 0;
-            /* Reset the IRS inactivity timer so it doesn't fire
-             * immediately after the keepalive round-trip completes. */
-            if (sess->dflow_state == ARQ_DFLOW_IDLE_IRS)
-                enter_idle_irs(sess);
+            sess->keepalive_miss_count    = 0;
+            /* After the guard elapses and the ACK TX completes, return to
+             * the appropriate idle role: IRS resets its inactivity timer;
+             * ISS (the normal case here) returns to IDLE_ISS. */
+            sess->keepalive_ack_enter_irs = (sess->dflow_state == ARQ_DFLOW_IDLE_IRS);
+            dflow_enter(sess, ARQ_DFLOW_KEEPALIVE_ACK_TX,
+                        hermes_uptime_ms() + ARQ_CHANNEL_GUARD_MS,
+                        ARQ_EV_TIMER_ACK);
             return;
         }
         break;
@@ -1853,6 +1857,19 @@ static void fsm_dflow(arq_session_t *sess, const arq_event_t *ev)
         }
         break;
 
+    case ARQ_DFLOW_KEEPALIVE_ACK_TX:
+        /* Channel guard elapsed: safe to respond to the peer's KEEPALIVE. */
+        if (ev->id == ARQ_EV_TIMER_ACK)
+            send_ctrl_frame(sess, ARQ_SUBTYPE_KEEPALIVE_ACK);
+        else if (ev->id == ARQ_EV_TX_COMPLETE)
+        {
+            if (sess->keepalive_ack_enter_irs)
+                enter_idle_irs(sess);
+            else
+                enter_idle_iss(sess, false);
+        }
+        break;
+
     case ARQ_DFLOW_KEEPALIVE_WAIT:
         if (ev->id == ARQ_EV_RX_KEEPALIVE_ACK)
         {
@@ -1864,12 +1881,14 @@ static void fsm_dflow(arq_session_t *sess, const arq_event_t *ev)
         }
         else if (ev->id == ARQ_EV_RX_KEEPALIVE)
         {
-            send_ctrl_frame(sess, ARQ_SUBTYPE_KEEPALIVE_ACK);
-            sess->keepalive_miss_count = 0;
-            if (sess->keepalive_from_irs)
-                enter_idle_irs(sess);
-            else
-                enter_idle_iss_guarded(sess, false);
+            /* Cross-keepalive: peer sent a simultaneous KEEPALIVE probe.
+             * Apply channel guard so we don't TX while the peer's PTT is
+             * still on (FreeDV decode fires before peer PTT-OFF). */
+            sess->keepalive_miss_count    = 0;
+            sess->keepalive_ack_enter_irs = sess->keepalive_from_irs;
+            dflow_enter(sess, ARQ_DFLOW_KEEPALIVE_ACK_TX,
+                        hermes_uptime_ms() + ARQ_CHANNEL_GUARD_MS,
+                        ARQ_EV_TIMER_ACK);
         }
         else if (ev->id == ARQ_EV_TIMER_RETRY)
         {
