@@ -1870,17 +1870,23 @@ static void fsm_dflow(arq_session_t *sess, const arq_event_t *ev)
             else if (sess->tx_retransmit_len > 0 &&
                      sess->tx_retransmit_seq == sess->tx_seq)
             {
-                /* RX_KEEPALIVE interrupted a WAIT_ACK: the data frame
-                 * (seq=%d) was never acknowledged.  Resume retransmitting
-                 * now rather than idling — the ring buffer is already
-                 * drained so tx_backlog()==0, which would silently starve
-                 * the IRS and create an infinite keepalive loop. */
+                /* RX_KEEPALIVE interrupted a WAIT_ACK: the data frame was
+                 * never acknowledged.  Resume retransmitting, but apply
+                 * ARQ_ISS_POST_ACK_GUARD_MS before keying up so the peer
+                 * has enough time to:
+                 *   1. Finish decoding the KEEPALIVE_ACK we just sent, and
+                 *   2. Switch its modem back to RX and re-acquire sync.
+                 * Without this guard the DATA preamble starts only ~50ms
+                 * after KEEPALIVE_ACK PTT-OFF, which prevents the peer from
+                 * decoding the KEEPALIVE_ACK and causes it to keep firing
+                 * keepalive retries that collide with our DATA frames. */
                 HLOGD(LOG_COMP,
-                      "KEEPALIVE_ACK done — resuming retransmit seq=%d",
+                      "KEEPALIVE_ACK done — resuming retransmit seq=%d (guarded)",
                       (int)sess->tx_seq);
                 dflow_enter(sess, ARQ_DFLOW_DATA_TX,
-                            UINT64_MAX, ARQ_EV_TIMER_RETRY);
-                send_data_frame(sess);
+                            hermes_uptime_ms() + ARQ_ISS_POST_ACK_GUARD_MS,
+                            ARQ_EV_TIMER_ACK);
+                /* send_data_frame() is called when TIMER_ACK fires */
             }
             else
             {

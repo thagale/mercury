@@ -604,13 +604,22 @@ void test_rx_keepalive_wait_ack_resumes_retransmit(void)
     TEST_ASSERT_EQUAL_INT(1, fake_send_tx_frame_fake.call_count);
     RESET_FAKE(fake_send_tx_frame);
 
-    /* TX_COMPLETE: must resume DATA_TX retransmit, NOT idle — ring buf is empty. */
+    /* TX_COMPLETE: must enter DATA_TX with a guard (NOT send immediately).
+     * The guard prevents the DATA preamble from starting ~50ms after
+     * KEEPALIVE_ACK PTT-OFF, which would prevent the peer from decoding
+     * the KEEPALIVE_ACK and cause further keepalive retries/collisions. */
     ev = make_event(ARQ_EV_TX_COMPLETE);
     arq_fsm_dispatch(&sess, &ev);
     TEST_ASSERT_EQUAL_INT(ARQ_DFLOW_DATA_TX, sess.dflow_state);
-    /* send_data_frame must have been called (retransmit from tx_retransmit_buf). */
-    TEST_ASSERT_EQUAL_INT(1, fake_send_tx_frame_fake.call_count);
+    /* Guard is active: frame must NOT be sent yet (TIMER_ACK fires later). */
+    TEST_ASSERT_EQUAL_INT(0, fake_send_tx_frame_fake.call_count);
     TEST_ASSERT_EQUAL_INT(ARQ_CONN_CONNECTED, sess.conn_state);
+
+    /* Guard elapses (TIMER_ACK): retransmit frame is sent from tx_retransmit_buf. */
+    ev = make_event(ARQ_EV_TIMER_ACK);
+    arq_fsm_dispatch(&sess, &ev);
+    TEST_ASSERT_EQUAL_INT(1, fake_send_tx_frame_fake.call_count);
+    TEST_ASSERT_EQUAL_INT(ARQ_DFLOW_DATA_TX, sess.dflow_state);
 }
 
 int main(void)
