@@ -574,6 +574,45 @@ void test_rx_keepalive_ack_sent_after_guard_returns_idle_iss(void)
     TEST_ASSERT_EQUAL_INT(ARQ_CONN_CONNECTED, sess.conn_state);
 }
 
+/* RX_KEEPALIVE while WAIT_ACK (data frame in flight, not yet ACKed) must
+ * NOT leave the ISS stuck in IDLE_ISS after sending KEEPALIVE_ACK.
+ * The ring buffer is already drained into tx_retransmit_buf so tx_backlog()
+ * returns 0 — enter_idle_iss() would silently idle both sides indefinitely.
+ * The fix: KEEPALIVE_ACK_TX TX_COMPLETE detects tx_retransmit_len > 0 and
+ * resumes the retransmit (DATA_TX) instead. */
+void test_rx_keepalive_wait_ack_resumes_retransmit(void)
+{
+    goto_connected();
+    goto_wait_ack();
+    /* tx_retransmit_buf now holds the unACKed frame; ring buffer is drained. */
+    TEST_ASSERT_GREATER_THAN(0, sess.tx_retransmit_len);
+    TEST_ASSERT_EQUAL_UINT8(sess.tx_seq, sess.tx_retransmit_seq);
+
+    /* Simulate ring buffer empty (data already read into retransmit buf). */
+    fake_tx_backlog_fake.return_val = 0;
+    RESET_FAKE(fake_send_tx_frame);
+
+    /* Peer sends KEEPALIVE while we are waiting for ACK. */
+    arq_event_t ev = make_event(ARQ_EV_RX_KEEPALIVE);
+    arq_fsm_dispatch(&sess, &ev);
+    TEST_ASSERT_EQUAL_INT(ARQ_DFLOW_KEEPALIVE_ACK_TX, sess.dflow_state);
+    TEST_ASSERT_EQUAL_INT(0, fake_send_tx_frame_fake.call_count);
+
+    /* Guard elapses: send KEEPALIVE_ACK. */
+    ev = make_event(ARQ_EV_TIMER_ACK);
+    arq_fsm_dispatch(&sess, &ev);
+    TEST_ASSERT_EQUAL_INT(1, fake_send_tx_frame_fake.call_count);
+    RESET_FAKE(fake_send_tx_frame);
+
+    /* TX_COMPLETE: must resume DATA_TX retransmit, NOT idle — ring buf is empty. */
+    ev = make_event(ARQ_EV_TX_COMPLETE);
+    arq_fsm_dispatch(&sess, &ev);
+    TEST_ASSERT_EQUAL_INT(ARQ_DFLOW_DATA_TX, sess.dflow_state);
+    /* send_data_frame must have been called (retransmit from tx_retransmit_buf). */
+    TEST_ASSERT_EQUAL_INT(1, fake_send_tx_frame_fake.call_count);
+    TEST_ASSERT_EQUAL_INT(ARQ_CONN_CONNECTED, sess.conn_state);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -602,5 +641,6 @@ int main(void)
     /* Keepalive channel-guard regression */
     RUN_TEST(test_rx_keepalive_idle_iss_enters_guarded_state);
     RUN_TEST(test_rx_keepalive_ack_sent_after_guard_returns_idle_iss);
+    RUN_TEST(test_rx_keepalive_wait_ack_resumes_retransmit);
     return UNITY_END();
 }

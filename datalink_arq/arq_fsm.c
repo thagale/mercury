@@ -1864,9 +1864,28 @@ static void fsm_dflow(arq_session_t *sess, const arq_event_t *ev)
         else if (ev->id == ARQ_EV_TX_COMPLETE)
         {
             if (sess->keepalive_ack_enter_irs)
+            {
                 enter_idle_irs(sess);
+            }
+            else if (sess->tx_retransmit_len > 0 &&
+                     sess->tx_retransmit_seq == sess->tx_seq)
+            {
+                /* RX_KEEPALIVE interrupted a WAIT_ACK: the data frame
+                 * (seq=%d) was never acknowledged.  Resume retransmitting
+                 * now rather than idling — the ring buffer is already
+                 * drained so tx_backlog()==0, which would silently starve
+                 * the IRS and create an infinite keepalive loop. */
+                HLOGD(LOG_COMP,
+                      "KEEPALIVE_ACK done — resuming retransmit seq=%d",
+                      (int)sess->tx_seq);
+                dflow_enter(sess, ARQ_DFLOW_DATA_TX,
+                            UINT64_MAX, ARQ_EV_TIMER_RETRY);
+                send_data_frame(sess);
+            }
             else
+            {
                 enter_idle_iss(sess, false);
+            }
         }
         break;
 
