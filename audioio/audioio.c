@@ -50,6 +50,7 @@
 #include "cap_recover.h"
 #include "pcm24.h"
 #include "hl2.h"
+#include "audio_rt.h"
 
 /* Must match the definition in common/mercury_engine.c: _Atomic, not
  * volatile.  This global is written from the termination signal handler and
@@ -1174,6 +1175,10 @@ static void *rtp_transport_thread(void *unused)
           rx_s, RTP_WIRE_DATA_PORT, tx_s, RTP_WIRE_DATA_PORT, tx.ssrc, iface);
     audio_health_set(false, AUDIO_HEALTH_RUNNING, NULL);
 
+    /* One TX packet is due every 20 ms, and the loop blocks in poll() each
+     * pass: safe to run SCHED_FIFO (see audio_rt.h). */
+    audio_rt_enter("audio-rtp");
+
     bool     have_src = false, rx_running = false;
     uint32_t src_ssrc = 0, next_ts = 0;
     uint64_t last_rx_ms = 0, next_free_ms = 0, last_log_ms = 0;
@@ -1608,6 +1613,11 @@ void *radio_playback_thread(void *device_ptr)
     /* Reached only after the device, rate, format and channel checks above:
      * the playback path is fully validated and about to stream. */
     audio_health_set(false, AUDIO_HEALTH_RUNNING, NULL);
+
+    /* From here on this thread only copies, resamples and blocks in
+     * audio->write() or the empty-ring sleep: safe to run SCHED_FIFO, and an
+     * underrun here keys a gap onto the air (see audio_rt.h). */
+    audio_rt_enter("audio-play");
 
     while (!mercury_stop && !audio_shutdown_)
     {
@@ -2102,6 +2112,11 @@ void *radio_capture_thread(void *device_ptr)
     /* Reached only after the device, rate and format checks above: the capture
      * path is fully validated and about to stream. */
     audio_health_set(true, AUDIO_HEALTH_RUNNING, NULL);
+
+    /* Every pass of the loop below either reads a period or sleeps
+     * CAP_POLL_MS (the reopen backoff sleeps too): safe to run SCHED_FIFO,
+     * and an overrun here loses RX samples (see audio_rt.h). */
+    audio_rt_enter("audio-cap");
 
     while (!mercury_stop && !audio_shutdown_)
     {

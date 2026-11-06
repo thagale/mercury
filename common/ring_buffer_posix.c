@@ -41,6 +41,39 @@ static inline void *memalign(size_t alignment, size_t size)
 
 // Private functions
 
+#if !defined(_WIN32)
+/* The ring lock, with priority inheritance where the platform has it.
+ *
+ * The audio I/O threads run SCHED_FIFO (audioio/audio_rt.h) and take these
+ * locks against normal-priority threads: the TX thread copies a whole burst
+ * into playback_buffer under one, rx_thread drains capture_buffer under the
+ * other.  Should such a holder be preempted inside its copy by any other
+ * normal thread, the audio thread waits on it for as long as the scheduler
+ * likes -- priority inversion, and the device buffer is only 30 ms.  With
+ * inheritance the holder runs at the waiter's priority until it unlocks.
+ *
+ * Best effort: where PI is unsupported, or refused for this combination of
+ * attributes, the lock is created exactly as before. */
+static void ring_mutex_init(pthread_mutex_t *m, bool pshared)
+{
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    if (pshared)
+        pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+#if defined(_POSIX_THREAD_PRIO_INHERIT) && _POSIX_THREAD_PRIO_INHERIT > 0
+    if (pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT) == 0 &&
+        pthread_mutex_init(m, &attr) == 0)
+    {
+        pthread_mutexattr_destroy(&attr);
+        return;
+    }
+    pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_NONE);
+#endif
+    pthread_mutex_init(m, &attr);
+    pthread_mutexattr_destroy(&attr);
+}
+#endif
+
 static void advance_pointer_n(cbuf_handle_t cbuf, size_t len)
 {
     assert(cbuf);
@@ -207,18 +240,13 @@ cbuf_handle_t circular_buf_init_shm(size_t size, char *base_name)
 
 #else
 
-    pthread_mutexattr_t mutex_attr;
-    pthread_mutexattr_init(&mutex_attr);
-    pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED);
-
     pthread_condattr_t cond_attr;
     pthread_condattr_init(&cond_attr);
     pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED);
 
-    pthread_mutex_init( &cbuf->internal->mutex, &mutex_attr);
+    ring_mutex_init( &cbuf->internal->mutex, true);
     pthread_cond_init( &cbuf->internal->cond, &cond_attr);
 
-    pthread_mutexattr_destroy(&mutex_attr);
     pthread_condattr_destroy(&cond_attr);
 
 #endif
@@ -691,7 +719,7 @@ cbuf_handle_t circular_buf_init(uint8_t* buffer, size_t size)
 				       NULL
 				       );
 #else
-    pthread_mutex_init( &cbuf->internal->mutex, NULL );
+    ring_mutex_init( &cbuf->internal->mutex, false);
     pthread_cond_init( &cbuf->internal->cond, NULL );
 #endif
     

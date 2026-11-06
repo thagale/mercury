@@ -20,6 +20,7 @@
 #include "hl2.h"
 #include "hl2_dsp.h"
 #include "hl2_wire.h"
+#include "audio_rt.h"
 
 #include "hermes_log.h"
 #include "os_interop.h"
@@ -399,6 +400,11 @@ void *hl2_transport_thread(void *arg)
         HLOGW(LOG_TAG, "no frequency set: receiving at the bottom of the range, not transmitting");
     else
         radio_io_report_frequency(atomic_load(&g_freq_hz));
+
+    /* Streaming from here: one EP2 packet every 2.625 ms or the radio's TX
+     * buffer runs dry, and the loop blocks in poll() each pass.  Discovery
+     * above stays at normal priority (see audio_rt.h). */
+    audio_rt_enter(LOG_TAG);
 
     /* Every register once, then start. */
     for (int i = 0; i < PRIME_PKTS; i++)

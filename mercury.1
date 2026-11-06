@@ -741,6 +741,22 @@ List supported Hamlib radio models:
 mercury \-K
 .fi
 .RE
+.SH ENVIRONMENT
+.TP
+.B MERCURY_RT_PRIORITY
+SCHED_FIFO priority for the threads that move audio to and from the device
+.RB ( alsa ,
+.BR pulse ,
+.BR oss ,
+.BR hl2 ,
+.BR rtp ).
+Default 20; 0 leaves them at normal priority.
+Linux and FreeBSD only.
+Real-time scheduling needs an rtprio limit of at least this value
+(\fI/etc/security/limits.conf\fR, or
+.B LimitRTPRIO=
+for a systemd service) or CAP_SYS_NICE; without one Mercury logs a warning
+and runs at normal priority.
 .SH SIGNALS
 .TP
 .B SIGINT\fR, \fBSIGTERM
