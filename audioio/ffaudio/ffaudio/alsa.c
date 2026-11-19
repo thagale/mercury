@@ -160,6 +160,7 @@ struct ffaudio_buf {
 	ffuint bufsize;
 	ffuint channels;
 	ffuint nonblock;
+	ffuint notify_unsync; // FFAUDIO_O_UNSYNC_NOTIFY
 
 	snd_pcm_uframes_t mmap_frames;
 	snd_pcm_uframes_t mmap_off;
@@ -290,6 +291,7 @@ int ffalsa_open(ffaudio_buf *b, ffaudio_conf *conf, ffuint flags)
 	int rc = FFAUDIO_ERROR;
 	int e;
 	b->nonblock = !!(flags & FFAUDIO_O_NONBLOCK);
+	b->notify_unsync = !!(flags & FFAUDIO_O_UNSYNC_NOTIFY);
 
 	b->errfunc = NULL;
 
@@ -554,8 +556,11 @@ int ffalsa_write(ffaudio_buf *b, const void *data, ffsize len)
 		}
 
 		if (r != 0) {
+			int xrun = (b->err == -EPIPE);
 			if (0 != alsa_handle_error(b, b->err))
 				break;
+			if (xrun && b->notify_unsync)
+				return -FFAUDIO_ESYNC; // recovered; the caller may retry
 			continue;
 		}
 
@@ -594,8 +599,12 @@ int ffalsa_read(ffaudio_buf *b, const void **data)
 		if (r > 0) {
 			return r;
 		} else if (r < 0) {
-			if (0 == alsa_handle_error(b, b->err))
+			int xrun = (b->err == -EPIPE);
+			if (0 == alsa_handle_error(b, b->err)) {
+				if (xrun && b->notify_unsync)
+					return -FFAUDIO_ESYNC; // recovered; the caller may read again
 				continue;
+			}
 			break;
 		}
 

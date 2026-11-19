@@ -1884,6 +1884,10 @@ void *radio_capture_thread(void *device_ptr)
      * immediately on no-data, handing control back so the stall watchdog can
      * tear the device down and reopen it. */
     conf.flags = FFAUDIO_CAPTURE | FFAUDIO_O_NONBLOCK;
+    /* Ask the backend to tell us about overruns (-FFAUDIO_ESYNC) instead of
+     * recovering from them silently, so the loop below can count them.  ALSA
+     * and AAudio honour this; backends that do not simply never report one. */
+    conf.flags |= FFAUDIO_O_UNSYNC_NOTIFY;
     ffaudio_init_conf aconf = {};
     aconf.app_name = "mercury_capture";
 
@@ -2083,6 +2087,11 @@ void *radio_capture_thread(void *device_ptr)
     uint32_t diag_read_errors = 0;
     uint32_t diag_buf_full_drops = 0;
     int      diag_last_read_bytes = 0;
+    /* Capture overruns: the device filled its buffer before we read it, and
+     * the backend dropped samples to recover.  Counted per diagnostics window
+     * and since the thread started; reported at debug level (-v). */
+    uint32_t diag_overruns       = 0;
+    uint64_t diag_overruns_total = 0;
 
     /* Stall watchdog.  With the non-blocking open above, audio->read() returns
      * 0 the instant no samples are available instead of spinning inside
@@ -2106,6 +2115,15 @@ void *radio_capture_thread(void *device_ptr)
     while (!mercury_stop && !audio_shutdown_)
     {
         r = audio->read(b, (const void **)&buffer);
+        if (r == -FFAUDIO_ESYNC)
+        {
+            /* An overrun the backend has already recovered from: not an
+             * error, just samples lost.  Count it and treat this poll as one
+             * that brought no data, so the stall watchdog still runs. */
+            diag_overruns++;
+            diag_overruns_total++;
+            r = 0;
+        }
         if (r < 0)
         {
             /* A device that fails every read fails it hundreds of times a
@@ -2359,6 +2377,14 @@ void *radio_capture_thread(void *device_ptr)
                   rate_48k, rate_8k, diag_last_read_bytes,
                   buf_used, buf_free, diag_buf_full_drops);
 #endif /* DEBUG_IO */
+            /* At most one line per window, and only when there was something
+             * to report: an overrun is worth knowing about (it is lost audio,
+             * and on a busy SBC it is the symptom of the scheduling trouble
+             * in issue #481), but a line per overrun could flood the log. */
+            if (diag_overruns != 0)
+                HLOGD("audio-cap", "capture overruns: %u in the last %.1f s (%llu since start)",
+                      diag_overruns, diag_elapsed / 1000.0,
+                      (unsigned long long)diag_overruns_total);
             /* reset counters */
             diag_start_ms = diag_now;
             diag_total_48k_frames = 0;
@@ -2366,8 +2392,13 @@ void *radio_capture_thread(void *device_ptr)
             diag_read_calls = 0;
             diag_read_errors = 0;
             diag_buf_full_drops = 0;
+            diag_overruns = 0;
         }
     }
+
+    if (diag_overruns_total != 0)
+        HLOGD("audio-cap", "capture overruns this run: %llu",
+              (unsigned long long)diag_overruns_total);
 
     r = audio->stop(b);
     if (r != 0)
