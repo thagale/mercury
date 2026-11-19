@@ -48,6 +48,11 @@ typedef struct circular_buf_t* cbuf_handle_t;
 // Shared memory init (create) function: 2 shared memory objects are created: base_name-1 and basename-2.
 cbuf_handle_t circular_buf_init_shm(size_t size, char *base_name);
 
+// As circular_buf_init_shm(), for a ring a real-time audio thread shares
+// with normal threads: its lock uses priority inheritance where the platform
+// has it (see common/audio_rt.h).  Other rings should not pay for that.
+cbuf_handle_t circular_buf_init_shm_rt(size_t size, char *base_name);
+
 // function to connect to an already created shared memory area
 cbuf_handle_t circular_buf_connect_shm(size_t size, char *base_name);
 
@@ -119,6 +124,11 @@ size_t circular_buf_free_size(cbuf_handle_t cbuf);
 /// Requires: buffer is not NULL, size > 0
 /// Ensures: cbuf has been created and is returned in an empty state
 cbuf_handle_t circular_buf_init(uint8_t *buffer, size_t size);
+
+/// As circular_buf_init(), for a ring a real-time audio thread shares with
+/// normal threads: its lock uses priority inheritance where the platform has
+/// it (see common/audio_rt.h).  Other rings should not pay for that.
+cbuf_handle_t circular_buf_init_rt(uint8_t *buffer, size_t size);
 
 /// Free a circular buffer structure
 /// Requires: cbuf is valid and created by circular_buf_init

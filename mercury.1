@@ -397,6 +397,7 @@ arq:call_max_s	300	Longest a station calls, whatever RETRIES says (0 = no cap, m
 arq:max_keydown_s	0	Longest transmission, s (0: the protocol's 30 s; else 5\-30); 16 for vARIM before 1.13, which aborts after about 20 s keyed (1.13 and later allow 35 s)
 audio:tx_gain_db	0.0	Modulator gain
 audio:tx_delay_ms	10	Delay from PTT on to audio
+audio:rt_priority	20	Real-time priority of the audio threads
 channel:busy_detect	false	Channel-busy (BUSY ON/OFF) detector
 channel:busy_reseed_on_hop	false	Busy detector takes a new noise floor at each scan hop (LISTEN OFF)
 .TE
@@ -750,7 +751,12 @@ SCHED_FIFO priority for the threads that move audio to and from the device
 .BR oss ,
 .BR hl2 ,
 .BR rtp ).
-Default 20; 0 leaves them at normal priority.
+Overrides
+.B rt_priority
+in the
+.B [audio]
+section of the configuration file, which defaults to 20.
+0 leaves them at normal priority.
 Linux and FreeBSD only.
 Real-time scheduling needs an rtprio limit of at least this value
 (\fI/etc/security/limits.conf\fR, or

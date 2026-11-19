@@ -312,7 +312,7 @@ MERCURY_LINK_INPUTS = \
 	modem/modem_freedv.o modem/modem_mfsk.o modem/mfsk/mfsk.o modem/mfsk/mfsk_ofdm.o modem/mfsk/mfsk_sync.o \
 	modem/mfsk/mfsk_ldpc.o modem/mfsk/mfsk_ldpc_1_16.o modem/mfsk/mfsk_ldpc_2_16.o modem/mfsk/mfsk_ldpc_3_16.o \
 	modem/mfsk/mfsk_ldpc_5_16.o modem/mfsk/mfsk_ldpc_8_16.o modem/framer.o modem/channel_busy.o modem/monitor_frame.o modem/freedv/libfreedvdata.a \
-	$(HOST_AUDIO_OBJS) common/os_interop.o $(HOST_SHM_OBJS) common/crc6.o common/hermes_log.o common/virtual_clock.o \
+	$(HOST_AUDIO_OBJS) common/os_interop.o $(HOST_SHM_OBJS) common/crc6.o common/hermes_log.o common/virtual_clock.o common/audio_rt.o \
 	common/chan.o common/queue.o common/mercury_engine.o common/mercury_cli.o common/mercury_modes.o common/message_store.o data_interfaces/tcp_interfaces.o data_interfaces/net.o \
 	gui_interface/ui_communication.o gui_interface/ui_status.o gui_interface/ui_devices.o gui_interface/ui_history.o \
 	gui_interface/websocket/ws_json.o $(HOST_UI_OBJS) \
@@ -446,7 +446,7 @@ MERCURY_CORE_OBJS = \
 	modem/modem.o modem/modem_freedv.o modem/modem_mfsk.o modem/mfsk/mfsk.o modem/mfsk/mfsk_ofdm.o modem/mfsk/mfsk_sync.o \
 	modem/mfsk/mfsk_ldpc.o modem/mfsk/mfsk_ldpc_1_16.o modem/mfsk/mfsk_ldpc_2_16.o modem/mfsk/mfsk_ldpc_3_16.o \
 	modem/mfsk/mfsk_ldpc_5_16.o modem/mfsk/mfsk_ldpc_8_16.o modem/framer.o modem/channel_busy.o modem/monitor_frame.o \
-	common/os_interop.o $(HOST_SHM_OBJS) common/crc6.o common/hermes_log.o common/virtual_clock.o \
+	common/os_interop.o $(HOST_SHM_OBJS) common/crc6.o common/hermes_log.o common/virtual_clock.o common/audio_rt.o \
 	common/chan.o common/queue.o common/mercury_engine.o common/mercury_cli.o common/mercury_modes.o common/message_store.o \
 	data_interfaces/tcp_interfaces.o data_interfaces/net.o \
 	gui_interface/ui_communication.o gui_interface/ui_status.o gui_interface/ui_devices.o gui_interface/ui_history.o \

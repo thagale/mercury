@@ -42,32 +42,43 @@ static inline void *memalign(size_t alignment, size_t size)
 // Private functions
 
 #if !defined(_WIN32)
-/* The ring lock, with priority inheritance where the platform has it.
+/* The ring lock, with priority inheritance where the platform has it and
+ * the caller asks for it (the _rt init variants).
  *
- * The audio I/O threads run SCHED_FIFO (audioio/audio_rt.h) and take these
- * locks against normal-priority threads: the TX thread copies a whole burst
- * into playback_buffer under one, rx_thread drains capture_buffer under the
- * other.  Should such a holder be preempted inside its copy by any other
- * normal thread, the audio thread waits on it for as long as the scheduler
- * likes -- priority inversion, and the device buffer is only 30 ms.  With
- * inheritance the holder runs at the waiter's priority until it unlocks.
+ * The audio I/O threads run SCHED_FIFO (common/audio_rt.h) and take the
+ * capture and playback ring locks against normal-priority threads: the TX
+ * thread copies a whole burst into playback_buffer under one, rx_thread
+ * drains capture_buffer under the other.  Should such a holder be preempted
+ * inside its copy by any other normal thread, the audio thread waits on it
+ * for as long as the scheduler likes -- priority inversion, and the device
+ * buffer is only 30 ms.  With inheritance the holder runs at the waiter's
+ * priority until it unlocks.
+ *
+ * Only those two rings ask for it.  A PI mutex has no userspace fast path
+ * under contention (every contended lock and unlock is a futex syscall), so
+ * the rings no real-time thread touches -- ARQ, the TCP interfaces,
+ * broadcast -- keep the ordinary lock.
  *
  * Best effort: where PI is unsupported, or refused for this combination of
  * attributes, the lock is created exactly as before. */
-static void ring_mutex_init(pthread_mutex_t *m, bool pshared)
+static void ring_mutex_init(pthread_mutex_t *m, bool pshared, bool prio_inherit)
 {
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     if (pshared)
         pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
 #if defined(_POSIX_THREAD_PRIO_INHERIT) && _POSIX_THREAD_PRIO_INHERIT > 0
-    if (pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT) == 0 &&
+    if (prio_inherit &&
+        pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT) == 0 &&
         pthread_mutex_init(m, &attr) == 0)
     {
         pthread_mutexattr_destroy(&attr);
         return;
     }
-    pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_NONE);
+    if (prio_inherit)
+        pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_NONE);
+#else
+    (void) prio_inherit;
 #endif
     pthread_mutex_init(m, &attr);
     pthread_mutexattr_destroy(&attr);
@@ -171,7 +182,7 @@ size_t circular_buf_free_size_internal(cbuf_handle_t cbuf)
 // !! Public User APIs !! //
 
 
-cbuf_handle_t circular_buf_init_shm(size_t size, char *base_name)
+static cbuf_handle_t ring_init_shm(size_t size, char *base_name, bool prio_inherit)
 {
     assert(size);
     char tmp[MAX_POSIX_SHM_NAME];
@@ -244,7 +255,7 @@ cbuf_handle_t circular_buf_init_shm(size_t size, char *base_name)
     pthread_condattr_init(&cond_attr);
     pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED);
 
-    ring_mutex_init( &cbuf->internal->mutex, true);
+    ring_mutex_init( &cbuf->internal->mutex, true, prio_inherit);
     pthread_cond_init( &cbuf->internal->cond, &cond_attr);
 
     pthread_condattr_destroy(&cond_attr);
@@ -256,6 +267,16 @@ cbuf_handle_t circular_buf_init_shm(size_t size, char *base_name)
     assert(circular_buf_empty(cbuf));
 
     return cbuf;
+}
+
+cbuf_handle_t circular_buf_init_shm(size_t size, char *base_name)
+{
+    return ring_init_shm(size, base_name, false);
+}
+
+cbuf_handle_t circular_buf_init_shm_rt(size_t size, char *base_name)
+{
+    return ring_init_shm(size, base_name, true);
 }
 
 cbuf_handle_t circular_buf_connect_shm(size_t size, char *base_name)
@@ -687,7 +708,7 @@ try_again_write:
 
 // this is the variant without inter-process shm, use these to init and free
 // user needs to allocate buffer
-cbuf_handle_t circular_buf_init(uint8_t* buffer, size_t size)
+static cbuf_handle_t ring_init(uint8_t* buffer, size_t size, bool prio_inherit)
 {
     assert(buffer && size);
 
@@ -719,7 +740,7 @@ cbuf_handle_t circular_buf_init(uint8_t* buffer, size_t size)
 				       NULL
 				       );
 #else
-    ring_mutex_init( &cbuf->internal->mutex, false);
+    ring_mutex_init( &cbuf->internal->mutex, false, prio_inherit);
     pthread_cond_init( &cbuf->internal->cond, NULL );
 #endif
     
@@ -728,6 +749,16 @@ cbuf_handle_t circular_buf_init(uint8_t* buffer, size_t size)
 
 
     return cbuf;
+}
+
+cbuf_handle_t circular_buf_init(uint8_t* buffer, size_t size)
+{
+    return ring_init(buffer, size, false);
+}
+
+cbuf_handle_t circular_buf_init_rt(uint8_t* buffer, size_t size)
+{
+    return ring_init(buffer, size, true);
 }
 
 // user needs to free previosly allocated buffer

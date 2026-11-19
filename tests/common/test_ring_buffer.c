@@ -310,6 +310,31 @@ void test_write_buffer_wakes_blocked_reader(void)
     circular_buf_free(rb);
 }
 
+/* The _rt variant (priority-inheriting lock where the platform has one,
+ * used for the capture and playback rings) parks and wakes exactly like the
+ * ordinary ring: a PI mutex under pthread_cond_wait must not change that. */
+void test_rt_ring_wakes_blocked_reader(void)
+{
+    uint8_t backing[32];
+    cbuf_handle_t rb = circular_buf_init_rt(backing, sizeof(backing));
+    TEST_ASSERT_NOT_NULL(rb);
+
+    struct clear_wake_ctx ctx = { .cbuf = rb, .done = 0 };
+    pthread_t tid;
+    pthread_create(&tid, NULL, empty_ring_reader, &ctx);
+
+    struct timespec ts = { 0, 50 * 1000 * 1000 }; /* 50 ms */
+    nanosleep(&ts, NULL);
+    TEST_ASSERT_EQUAL_INT(0, ctx.done); /* reader must be parked */
+
+    uint8_t byte = 0x77;
+    TEST_ASSERT_EQUAL_INT(0, write_buffer(rb, &byte, 1));
+
+    pthread_join(tid, NULL);
+    TEST_ASSERT_EQUAL_INT(1, ctx.done);
+    circular_buf_free(rb);
+}
+
 /* Test 13: two concurrent writers + one reader, no outer lock.
  *
  * The deadlock fix removed g_app_tx_mtx from the write sites on the grounds
@@ -396,6 +421,7 @@ int main(void)
     RUN_TEST(test_clear_buffer_wakes_blocked_writer);
     RUN_TEST(test_read_buffer_wakes_blocked_writer);
     RUN_TEST(test_write_buffer_wakes_blocked_reader);
+    RUN_TEST(test_rt_ring_wakes_blocked_reader);
     RUN_TEST(test_concurrent_writers_data_integrity);
     return UNITY_END();
 }

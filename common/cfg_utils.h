@@ -71,6 +71,10 @@
 #define CFG_KEY_DISCONNECT_DRAIN_TIMEOUT_S "arq:disconnect_drain_timeout_s"
 #define CFG_KEY_TX_GAIN_DB          "audio:tx_gain_db"
 #define CFG_KEY_TX_DELAY_MS         "audio:tx_delay_ms"
+#define CFG_KEY_RT_PRIORITY         "audio:rt_priority"
+
+/* Keep in step with AUDIO_RT_DEFAULT_PRIORITY (common/audio_rt.h). */
+#define CFG_RT_PRIORITY_DEFAULT     20
 #define CFG_KEY_TNC_KEEPALIVE_S     "tnc:keepalive_s"
 #define CFG_KEY_TNC_BUFFER_REPORT_MS "tnc:buffer_report_ms"
 #define CFG_KEY_TNC_ABSORB_IDLE_DISCONNECT_S "tnc:absorb_idle_disconnect_s"
@@ -153,6 +157,12 @@ typedef struct {
                                     * slow external PTT more time to key up
                                     * before the signal starts. Clamped
                                     * 0..2000. */
+    int      rt_priority;           /* SCHED_FIFO priority for the threads
+                                    * that move audio to and from the device
+                                    * (Linux and FreeBSD).  0 = off, 1..99,
+                                    * default CFG_RT_PRIORITY_DEFAULT.  The
+                                    * MERCURY_RT_PRIORITY environment variable
+                                    * overrides it.  See common/audio_rt.h. */
     int      tnc_keepalive_s;       /* IAMALIVE interval on the TNC control
                                     * port. Default 60, clamped 5..600.   */
     int      tnc_buffer_report_ms;  /* BUFFER report interval on the TNC

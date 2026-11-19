@@ -169,6 +169,18 @@ tx_gain_db = 0.0
 ; Range: 0 .. 2000 (values outside are clamped).
 tx_delay_ms = 10
 
+; Real-time priority (SCHED_FIFO) for the threads that move audio to and
+; from the device (default: 20).  It helps on busy single-board computers
+; such as a Raspberry Pi, where other work can otherwise keep these threads
+; waiting long enough to lose audio.  0 leaves them at normal priority.
+; Linux and FreeBSD only.  Needs an rtprio limit of at least this value
+; (/etc/security/limits.conf, or LimitRTPRIO= for a systemd service) or
+; CAP_SYS_NICE; without one Mercury logs a warning once and carries on at
+; normal priority.  The MERCURY_RT_PRIORITY environment variable, if set,
+; overrides this.
+; Range: 0 .. 99 (values outside are ignored).
+rt_priority = 20
+
 [arq]
 
 ; Older files may still set no_progress_timeout_s, data_retry_slots,

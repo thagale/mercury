@@ -26,6 +26,7 @@
 #include "broadcast.h"
 #include "defines_modem.h"
 #include "audioio/audioio.h"
+#include "audio_rt.h"
 #include "tcp_interfaces.h"
 #include "hermes_log.h"
 #include "radio_io.h"
@@ -196,6 +197,7 @@ int mercury_engine_init(const mercury_config *cfg,
     arq_set_max_keydown_s(cfg->max_keydown_s);
     modem_set_tx_gain(powf(10.0f, cfg->tx_gain_db / 20.0f));
     modem_set_tx_delay_ms(cfg->tx_delay_ms);
+    audio_rt_set_priority(cfg->rt_priority);
     modem_set_busy_cfg((float)cfg->busy_threshold_db,
                        (float)cfg->busy_hysteresis_db,
                        (uint32_t)cfg->busy_on_debounce_ms,

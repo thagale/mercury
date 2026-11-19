@@ -544,11 +544,44 @@ void test_log_max_mb_roundtrips(void)
     TEST_ASSERT_EQUAL_INT(CFG_LOG_MAX_MB_DEFAULT, r.log_max_mb);
 }
 
+/* audio:rt_priority: default 20, round-trips 0 (off) to 99, and an out-of-range
+ * value keeps what was there. */
+void test_rt_priority_roundtrips_and_rejects_out_of_range(void)
+{
+    mercury_config w, r;
+    cfg_set_defaults(&r);
+    TEST_ASSERT_EQUAL_INT(CFG_RT_PRIORITY_DEFAULT, r.rt_priority);
+
+    int values[] = { 0, 1, 20, 99 };
+    for (size_t k = 0; k < sizeof values / sizeof values[0]; k++)
+    {
+        cfg_set_defaults(&w);
+        w.rt_priority = values[k];
+        TEST_ASSERT_TRUE(cfg_write(&w, TMP));
+        cfg_set_defaults(&r);
+        r.rt_priority = 7;
+        TEST_ASSERT_TRUE(cfg_read(&r, TMP));
+        TEST_ASSERT_EQUAL_INT(values[k], r.rt_priority);
+    }
+
+    int bad[] = { -1, 100 };
+    for (size_t k = 0; k < sizeof bad / sizeof bad[0]; k++)
+    {
+        cfg_set_defaults(&w);
+        w.rt_priority = bad[k];
+        TEST_ASSERT_TRUE(cfg_write(&w, TMP));
+        cfg_set_defaults(&r);
+        TEST_ASSERT_TRUE(cfg_read(&r, TMP));
+        TEST_ASSERT_EQUAL_INT(CFG_RT_PRIORITY_DEFAULT, r.rt_priority);
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_log_utc_roundtrips);
     RUN_TEST(test_log_max_mb_roundtrips);
+    RUN_TEST(test_rt_priority_roundtrips_and_rejects_out_of_range);
     RUN_TEST(test_defaults_match_constants);
     RUN_TEST(test_tls_cert_paths_default_to_the_system_locations);
     RUN_TEST(test_tls_settings_roundtrip);

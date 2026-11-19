@@ -3011,8 +3011,8 @@ static int audioio_init_local_buffers(void)
         return -1;
     }
 
-    capture_buffer = circular_buf_init(buffer_cap, SIGNAL_BUFFER_SIZE);
-    playback_buffer = circular_buf_init(buffer_play, SIGNAL_BUFFER_SIZE);
+    capture_buffer = circular_buf_init_rt(buffer_cap, SIGNAL_BUFFER_SIZE);
+    playback_buffer = circular_buf_init_rt(buffer_play, SIGNAL_BUFFER_SIZE);
     if (!capture_buffer || !playback_buffer)
     {
         if (capture_buffer)
@@ -3054,8 +3054,8 @@ int audioio_init_buffers(void)
         // Named cross-process SHM: the transport to an EXTERNAL signal source
         // (the radio daemon, e.g. sbitx_controller, via -x shm).  Only this
         // backend needs the fixed SHM names.
-        capture_buffer  = circular_buf_init_shm(SIGNAL_BUFFER_SIZE, (char *) SIGNAL_INPUT);
-        playback_buffer = circular_buf_init_shm(SIGNAL_BUFFER_SIZE, (char *) SIGNAL_OUTPUT);
+        capture_buffer  = circular_buf_init_shm_rt(SIGNAL_BUFFER_SIZE, (char *) SIGNAL_INPUT);
+        playback_buffer = circular_buf_init_shm_rt(SIGNAL_BUFFER_SIZE, (char *) SIGNAL_OUTPUT);
     }
     else
     {
